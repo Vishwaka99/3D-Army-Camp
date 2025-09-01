@@ -1,0 +1,264 @@
+#include <glut.h>
+#include <math.h>
+#include <SOIL2.h>
+#include <stdio.h>
+
+#define M_PI 3.14159265358979323846
+
+GLuint poleTexture;
+
+// Constants
+const float RADIUS = 10.0f;
+const float LENGTH = 48.0f;
+const float BASE_Y = -3.0f;
+const int SEG_ARC = 36;     // Reduced resolution
+const int SEG_LEN = 40;     // Reduced resolution
+
+// Colors
+float wallColor[] = { 0.7f, 0.7f, 0.7f };
+float roofColor[] = { 0.8f, 0.8f, 0.8f };
+float groundColor[] = { 0.4f, 0.6f, 0.3f };
+float glassColor[] = { 0.2f, 0.3f, 0.6f, 0.5f };
+float doorColor[] = { 0.5f, 0.5f, 0.5f };
+
+// Camera
+float angle = 0.0f;
+float camDistance = 48.0f;
+float camHeight = 16.0f;
+
+// Helper function to get arch point
+void archPoint(float t, float& x, float& y) {
+    x = RADIUS * cosf(t);
+    y = RADIUS * sinf(t);
+}
+
+void loadTexture() {
+    poleTexture = SOIL_load_OGL_texture(
+        "wall.jpg",
+        SOIL_LOAD_AUTO,
+        SOIL_CREATE_NEW_ID,
+        SOIL_FLAG_MIPMAPS | SOIL_FLAG_INVERT_Y
+    );
+
+    if (!poleTexture) {
+        printf("Texture load failed: %s\n", SOIL_last_result());
+        //exit(1);
+    }
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, poleTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
+
+// Initialize OpenGL
+void init() {
+    glEnable(GL_DEPTH_TEST);
+    loadTexture();
+    glClearColor(0.6f, 0.74f, 0.9f, 1.0f); // Sky blue
+
+    // Simple lighting
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+
+    GLfloat lightPos[] = { 30.0f, 25.0f, 20.0f, 1.0f };
+    GLfloat lightColor[] = { 1.0f, 1.0f, 0.95f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, lightColor);
+
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
+}
+
+// Draw ground
+void drawGround() {
+    glColor3fv(groundColor);
+    glBegin(GL_QUADS);
+    glNormal3f(0, 1, 0);
+    glVertex3f(-80, BASE_Y, -80);
+    glVertex3f(80, BASE_Y, -80);
+    glVertex3f(80, BASE_Y, 80);
+    glVertex3f(-80, BASE_Y, 80);
+    glEnd();
+}
+
+// Draw curved shell (roof)
+// Draw curved shell (roof) with texture
+void drawShell() {
+    glEnable(GL_TEXTURE_2D);
+    glColor3fv(roofColor);
+    glBindTexture(GL_TEXTURE_2D, poleTexture);
+
+    float z0 = -LENGTH * 0.5f;
+    float dT = (float)M_PI / SEG_ARC;
+    float dZ = LENGTH / SEG_LEN;
+
+    for (int i = 0; i < SEG_ARC; ++i) {
+        float t1 = i * dT, t2 = (i + 1) * dT;
+        float x1, y1, x2, y2;
+        archPoint(t1, x1, y1);
+        archPoint(t2, x2, y2);
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for (int j = 0; j <= SEG_LEN; ++j) {
+            float z = z0 + j * dZ;
+
+            // Compute texture coordinates
+            float u1 = (float)i / SEG_ARC;        // around the arch
+            float u2 = (float)(i + 1) / SEG_ARC;
+            float v = (float)j / SEG_LEN;         // along the length
+
+            // Vertex 1 (t2)
+            glNormal3f(cosf(t2), sinf(t2), 0);
+            glTexCoord2f(u2, v);
+            glVertex3f(x2, BASE_Y + y2, z);
+
+            // Vertex 2 (t1)
+            glNormal3f(cosf(t1), sinf(t1), 0);
+            glTexCoord2f(u1, v);
+            glVertex3f(x1, BASE_Y + y1, z);
+        }
+        glEnd();
+    }
+
+    glDisable(GL_TEXTURE_2D);
+}
+
+
+// Draw end wall
+void drawEndWall(float zPos, bool withDoor) {
+    glColor3fv(wallColor);
+
+    float dT = (float)M_PI / SEG_ARC;
+    for (int i = 0; i < SEG_ARC; ++i) {
+        float t1 = i * dT, t2 = (i + 1) * dT;
+        float x1, y1, x2, y2;
+        archPoint(t1, x1, y1);
+        archPoint(t2, x2, y2);
+
+        glBegin(GL_QUADS);
+        glNormal3f(0, 0, (zPos > 0) ? 1.0f : -1.0f);
+        glVertex3f(x1, BASE_Y, zPos);
+        glVertex3f(x1, BASE_Y + y1, zPos);
+        glVertex3f(x2, BASE_Y + y2, zPos);
+        glVertex3f(x2, BASE_Y, zPos);
+        glEnd();
+    }
+
+    // Simple door representation
+    if (withDoor) {
+        glColor3fv(doorColor);
+        glBegin(GL_QUADS);
+        glNormal3f(0, 0, (zPos > 0) ? 1.0f : -1.0f);
+        glVertex3f(-4.0f, BASE_Y, zPos + 0.01f);
+        glVertex3f(4.0f, BASE_Y, zPos + 0.01f);
+        glVertex3f(4.0f, BASE_Y + 7.0f, zPos + 0.01f);
+        glVertex3f(-4.0f, BASE_Y + 7.0f, zPos + 0.01f);
+        glEnd();
+    }
+}
+
+// Draw side windows
+void drawSideWindows() {
+    glColor4fv(glassColor);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    float zStart = -LENGTH * 0.5f + 12.0f;
+    float spacing = 6.5f;
+    int count = 5;
+
+    float theta = M_PI * 0.62f;
+    float x, y;
+    archPoint(theta, x, y);
+
+    for (int i = 0; i < count; ++i) {
+        float z = zStart + i * spacing;
+
+        glBegin(GL_QUADS);
+        glNormal3f(cosf(theta), sinf(theta), 0);
+        glVertex3f(x, BASE_Y + y - 0.8f, z - 1.1f);
+        glVertex3f(x, BASE_Y + y - 0.8f, z + 1.1f);
+        glVertex3f(x, BASE_Y + y + 0.8f, z + 1.1f);
+        glVertex3f(x, BASE_Y + y + 0.8f, z - 1.1f);
+        glEnd();
+    }
+
+    glDisable(GL_BLEND);
+}
+
+// Draw the complete warehouse
+void drawWarehouse() {
+    drawGround();
+    drawShell();
+    drawEndWall(LENGTH * 0.5f, true);  // Front with door
+    drawEndWall(-LENGTH * 0.5f, false); // Back without door
+    drawSideWindows();
+}
+
+// Display callback
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+
+    // Camera position
+    float cx = camDistance * sinf(angle * M_PI / 180.0f);
+    float cz = camDistance * cosf(angle * M_PI / 180.0f);
+    gluLookAt(cx, camHeight, cz, 0.0f, 2.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    drawWarehouse();
+
+    glutSwapBuffers();
+}
+
+// Reshape callback
+void reshape(int w, int h) {
+    glViewport(0, 0, w, h);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(45.0, (float)w / (float)h, 1.0, 300.0);
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// Timer function for animation
+void update(int value) {
+    angle += 0.5f;
+    if (angle > 360) angle -= 360;
+    glutPostRedisplay();
+    glutTimerFunc(16, update, 0);
+}
+
+// Keyboard controls
+void keyboard(unsigned char key, int x, int y) {
+    switch (key) {
+    case 'a': case 'A': angle -= 5.0f; break;
+    case 'd': case 'D': angle += 5.0f; break;
+    case 'w': case 'W': camDistance -= 2.0f; break;
+    case 's': case 'S': camDistance += 2.0f; break;
+    case 'q': case 'Q': camHeight += 1.0f; break;
+    case 'e': case 'E': camHeight -= 1.0f; break;
+    //case 27: exit(0); break; // ESC key
+    }
+    glutPostRedisplay();
+}
+
+// Main function
+int main(int argc, char** argv) {
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+    glutInitWindowSize(800, 600);
+    glutCreateWindow("Simplified Warehouse - OpenGL/GLUT");
+
+    init();
+
+    glutDisplayFunc(display);
+    glutReshapeFunc(reshape);
+    glutKeyboardFunc(keyboard);
+    glutTimerFunc(25, update, 0);
+
+    glutMainLoop();
+    return 0;
+}
